@@ -94,91 +94,71 @@ def fetch_log_links(url, base_url=None, allow=True):
         print(f"Error fetching {url}: {e}")
 
 # Function to save command outputs to a JSON file, ensuring no duplicate outputs
+
 def save_to_json(command, output, ceph_version):
     global global_output_hashes
     global complete_url
-    
 
+    # Base directory
     base_dir = "Suriya"
-    if not os.path.exists(base_dir):
-        try:
-            os.makedirs(base_dir)
-        except Exception as e:
-            print(f"Failed to create '{base_dir}' folder: {e}")
-            return
-   
+    os.makedirs(base_dir, exist_ok=True)
+
+    # Extract OpenStack version, RHEL version, and Ceph version
     url_parts = complete_url.split("/")
-    rhel_version = url_parts[8]
-    ceph_version_full = url_parts[10]  
-    
-    rhel_version_dir = os.path.join(base_dir, url_parts[7])  # e.g., "8.0"
-    ceph_version_dir = os.path.join(rhel_version_dir, rhel_version)
-    full_version_dir = os.path.join(ceph_version_dir, ceph_version_full)
+    openstack_version = url_parts[7]  # Example: "openstack", "openstack-v2"
+    rhel_version = url_parts[8]      # Example: "RH8.6", "rh9.0"
+    ceph_version_full = url_parts[10]  # Example: "16.2.10", "19.3.0-12"
 
-    if not os.path.exists(rhel_version_dir):
-        try:
-            os.makedirs(rhel_version_dir)
-        except Exception as e:
-            print(f"Failed to create directory {rhel_version_dir}: {e}")
-            return
+    # Construct directory hierarchy
+    openstack_dir = os.path.join(base_dir, openstack_version)  # e.g., "Suriya/openstack"
+    rhel_version_dir = os.path.join(openstack_dir, rhel_version)  # e.g., "Suriya/openstack/RH8.6"
+    ceph_version_dir = os.path.join(rhel_version_dir, ceph_version_full)  # e.g., "Suriya/openstack/RH8.6/16.2.10"
 
-    if not os.path.exists(ceph_version_dir):
-        try:
-            os.makedirs(ceph_version_dir)
-        except Exception as e:
-            print(f"Failed to create directory {ceph_version_dir}: {e}")
-            return
+    # Create directories if they do not exist
+    os.makedirs(ceph_version_dir, exist_ok=True)
 
-    if not os.path.exists(full_version_dir):
-        try:
-            os.makedirs(full_version_dir)
-        except Exception as e:
-            print(f"Failed to create directory {full_version_dir}: {e}")
-            return
-
+    # Determine subcommand from command string
     match = re.search(r'radosgw-admin (\w+)', command)
     if match:
         subcommand = match.group(1)
-        file_name = os.path.join(full_version_dir, f"{subcommand}_outputs.json")
+        file_name = os.path.join(ceph_version_dir, f"{subcommand}_outputs.json")
 
+        # Load existing JSON data or initialize a new one
         if os.path.exists(file_name):
             with open(file_name, 'r') as file:
                 try:
                     data = json.load(file)
                 except json.JSONDecodeError:
-                    print(f"File {file_name} contains invalid JSON. Reinitializing.")
-                    data = {"ceph_version": ceph_version, "outputs": []}
+                    print(f"Invalid JSON in {file_name}. Initializing a new file.")
+                    data = {"ceph_version": ceph_version_full, "outputs": []}
         else:
-            data = {"ceph_version": ceph_version, "outputs": []}
+            data = {"ceph_version": ceph_version_full, "outputs": []}
 
-        if "outputs" not in data:
-            data["outputs"] = []
-
+        # Calculate a hash for the output
         output_hash = hashlib.sha256(json.dumps(output, sort_keys=True).encode('utf-8')).hexdigest()
 
+        # Check for duplicates
         if output_hash in global_output_hashes:
-            print(f"Global duplicate output found for output_hash: {output_hash} - skipping.")
+            print(f"Duplicate output globally for hash {output_hash}. Skipping.")
             return
 
-        duplicate_found = any(entry["output_hash"] == output_hash for entry in data["outputs"])
-
-        if not duplicate_found:
+        if not any(entry["output_hash"] == output_hash for entry in data["outputs"]):
             data["outputs"].append({
                 "command": command,
                 "output": output,
                 "output_hash": output_hash,
             })
 
-            try:
-                with open(file_name, 'w') as file:
-                    json.dump(data, file, indent=4)
-                print(f"Output saved to {file_name}")
-            except Exception as e:
-                print(f"Error saving to {file_name}: {e}")
+            # Save updated data back to the JSON file
+            with open(file_name, 'w') as file:
+                json.dump(data, file, indent=4)
+            print(f"Saved output to {file_name}")
 
+            # Add to global hashes
             global_output_hashes.add(output_hash)
         else:
-            print(f"File-level duplicate output found for output_hash: {output_hash} - skipping.")
+            print(f"Duplicate output in file {file_name} for hash {output_hash}. Skipping.")
+
 
 
 # Function to process a single log file URL
@@ -201,7 +181,7 @@ def process_log_file(file_url, pc=set()):
 
             # Iterate through lines to find commands and their outputs
             for i in range(len(lines)):
-                if 'Execute cephadm shell -- radosgw-admin' in lines[i]:
+                if 'cephadm shell -- radosgw-admin' in lines[i]:
                     # Extract Ceph version from the log
                     version_line = lines[i + 2].strip()
                     ceph_version = ".".join(version_line.split()[5].split(".")[6:9])
@@ -331,7 +311,7 @@ def navigation_folder(base_url):
             except ValueError:
                 print("Invalid input.")
 
-    subcomponent_filter = input("\nEnter a subcomponent filter (or press Enter to skip): ").strip()
+    subcomponent_filter = input("\nEnter a subcomponent filter (like rgw,rbd,rados): ").strip()
 
     return c, subcomponent_filter
 
